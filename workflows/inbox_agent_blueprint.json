@@ -1,0 +1,176 @@
+{
+  "name": "Inbox Autonomous AI Agent (VID_001 Blueprint)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "-from:me label:inbox"
+        }
+      },
+      "id": "node-01-gmail-trigger",
+      "name": "Gmail Trigger (Watch Inbox)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "promptType": "define",
+        "text": "=Classify incoming email intent into exactly ONE category from this closed list: urgent, scheduling, question, invoice, ignore.\nDo not classify by superficial keywords; evaluate what the sender actually needs.\n\nEmail From: {{ $json.from.value[0].address }}\nEmail Subject: {{ $json.subject }}\nEmail Snippet: {{ $json.snippet }}\nEmail Body: {{ $json.textPlain }}",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "node-02-ai-classifier",
+      "name": "AI Intent Classifier",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.category }}",
+              "operation": "regex",
+              "value2": "(urgent|scheduling|question)"
+            }
+          ]
+        }
+      },
+      "id": "node-03-routing-governor",
+      "name": "Routing & Iteration Governor",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "promptType": "define",
+        "text": "=Draft a professional response to this email adhering to these 3 inviolable engineering constraints:\n1. Answer ONLY what the email explicitly asks.\n2. Match a concise, professional tone in 2 to 5 sentences.\n3. NEVER invent facts. If date or agenda information is missing, ask.\n\nOriginal Subject: {{ $('Gmail Trigger (Watch Inbox)').item.json.subject }}\nSender: {{ $('Gmail Trigger (Watch Inbox)').item.json.from.value[0].address }}\nEmail Content: {{ $('Gmail Trigger (Watch Inbox)').item.json.textPlain }}",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "node-04-ai-drafter",
+      "name": "AI Reply Drafter",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [960, 240]
+    },
+    {
+      "parameters": {
+        "jsonSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"subject\": {\n      \"type\": \"string\",\n      \"description\": \"Clean reply subject line under 6 words referencing thread topic\"\n    },\n    \"body\": {\n      \"type\": \"string\",\n      \"description\": \"Draft email body text\"\n    }\n  },\n  \"required\": [\"subject\", \"body\"]\n}"
+      },
+      "id": "node-05-structured-parser",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1,
+      "position": [1200, 240]
+    },
+    {
+      "parameters": {
+        "operation": "createDraft",
+        "messageId": "={{ $('Gmail Trigger (Watch Inbox)').item.json.id }}",
+        "threadId": "={{ $('Gmail Trigger (Watch Inbox)').item.json.threadId }}",
+        "toList": "={{ [$('Gmail Trigger (Watch Inbox)').item.json.from.value[0].address] }}",
+        "subject": "={{ $json.output.subject }}",
+        "message": "={{ $json.output.body }}"
+      },
+      "id": "node-06-gmail-create-draft",
+      "name": "Gmail: Create Draft (Never Send)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1440, 240]
+    },
+    {
+      "parameters": {
+        "message": "=🤖 [Nexos AI Lab] New Inbox Draft Created\n• Category: {{ $('AI Intent Classifier').item.json.category }}\n• Sender: {{ $('Gmail Trigger (Watch Inbox)').item.json.from.value[0].address }}\n• Subject: {{ $json.output.subject }}\n• Status: Draft waiting for human one-click approval."
+      },
+      "id": "node-07-notify-dispatch",
+      "name": "Operator Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1680, 240]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger (Watch Inbox)": {
+      "main": [
+        [
+          {
+            "node": "AI Intent Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Intent Classifier": {
+      "main": [
+        [
+          {
+            "node": "Routing & Iteration Governor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Routing & Iteration Governor": {
+      "main": [
+        [
+          {
+            "node": "AI Reply Drafter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Reply Drafter": {
+      "main": [
+        [
+          {
+            "node": "Structured Output Parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "main": [
+        [
+          {
+            "node": "Gmail: Create Draft (Never Send)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: Create Draft (Never Send)": {
+      "main": [
+        [
+          {
+            "node": "Operator Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
